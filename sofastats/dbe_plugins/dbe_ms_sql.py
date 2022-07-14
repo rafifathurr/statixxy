@@ -1,0 +1,437 @@
+## Must run makepy once - 
+## see http://www.thescripts.com/forum/thread482449.html e.g. the following 
+## way - run PYTHON\Lib\site-packages\pythonwin\pythonwin.exe (replace PYTHON 
+## with folder python is in).  Tools>COM Makepy utility - select appropriate 
+## library - e.g. for ADO it would be Microsoft ActiveX Data Objects 2.8 Library 
+## (2.8) - and select OK. NB DAO must be done separately from ADO etc.
+
+import adodbapi #@UnresolvedImport
+import win32com.client #@UnresolvedImport
+
+import wx
+import pprint
+
+from sofastats import basic_lib as b
+from sofastats import my_globals as mg
+from sofastats.dbe_plugins import dbe_globals
+from sofastats import my_exceptions
+from sofastats import lib
+
+AD_OPEN_KEYSET = 1
+AD_LOCK_OPTIMISTIC = 3
+AD_SCHEMA_COLUMNS = 4
+
+if_clause = "CASE WHEN %s THEN %s ELSE %s END"
+placeholder = '?'
+left_obj_quote = '['
+right_obj_quote = ']'
+gte_not_equals = '!='
+cartesian_joiner = ' CROSS JOIN '
+
+def quote_obj(raw_val):
+    return f"{left_obj_quote}{raw_val}{right_obj_quote}"
+
+def quote_val(raw_val):
+    return lib.DbLib.quote_val(raw_val,
+        sql_str_literal_quote="'", sql_esc_str_literal_quote="''")
+
+def val2float(raw_val):
+    return f"cast({raw_val} as float)"
+
+def get_summable(clause):
+    return f"CASE WHEN {clause} THEN 1 ELSE 0 END"
+
+def get_first_sql(quoted_tblname, top_n, order_val=None):
+    orderby = f"ORDER BY {quote_obj(order_val)}" if order_val else ''
+    return f"SELECT TOP {top_n} * FROM {quoted_tblname} {orderby}"
+
+def get_syntax_elements():
+    return (if_clause, left_obj_quote, right_obj_quote, quote_obj, quote_val,
+        placeholder, get_summable, gte_not_equals, cartesian_joiner)
+
+def get_DSN(provider, host, user, pwd, db):
+    """
+    http://www.connectionstrings.com/sql-server-2005
+    """
+    DSN = f"""PROVIDER={provider};
+        Data Source='{host}';
+        User ID='{user}';
+        Password='{pwd}';
+        Initial Catalog='{db}';
+        Integrated Security=SSPI"""
+    return DSN
+
+def get_dbs(host, user, pwd, default_dbs, db=None):
+    """
+    Get dbs and the db to use.  Exclude master.
+
+    NB need to use a separate connection here with db Initial Catalog
+    undefined.        
+    """
+    DSN = get_DSN(provider='SQLOLEDB', host=host, user=user, pwd=pwd, db='')
+    try:
+        con = adodbapi.connect(DSN)
+    except Exception:
+        raise Exception("Unable to connect to MS SQL Server with host: "
+            f"{host}; user: {user}; and pwd: {pwd}")
+    cur = con.cursor()  ## must return tuples not dics
+    cur.adoconn = con.adoConn  ## (need to access from just the cursor)
+    try:  ## MS SQL Server 2000
+        cur.execute("SELECT name FROM master.dbo.sysdatabases ORDER BY name")
+    except Exception:  ## SQL Server 2005
+        cur.execute("SELECT name FROM sys.databases ORDER BY name")
+    ## only want dbs with at least one table.
+    all_dbs = [x[0] for x in cur.fetchall() if x[0] != 'master']
+    dbs = []
+    for db4list in all_dbs:
+        try:
+            con, cur = get_con_cur_for_db(host, user, pwd, db4list)
+        except Exception:
+            continue
+        if has_tbls(cur, db4list):
+            dbs.append(db4list)
+    if not dbs:
+        raise Exception(_("Unable to find any databases that have tables "
+            "and you have permission to access."))
+    dbs_lc = [x.lower() for x in dbs]
+    ## Get db (default if possible otherwise first)
+    ## NB db must be accessible from connection
+    if not db:
+        ## Use default if possible, or fall back to first. NB may have no tables
+        default_db_mssql = default_dbs.get(mg.DBE_MS_SQL)  ## might be None
+        if default_db_mssql:
+            if default_db_mssql.lower() in dbs_lc:
+                db = default_db_mssql
+        else:
+            db = dbs[0]
+    else:
+        if db.lower() not in dbs_lc:
+            raise Exception(
+                f'Database "{db}" not available from supplied connection')
+    cur.close()
+    con.close()
+    return dbs, db
+
+def set_db_in_con_dets(con_dets, db):
+    "Set database in connection details (if appropriate)"
+    con_dets['db'] = db
+
+def get_con_cur_for_db(host, user, pwd, db):
+    DSN = get_DSN(provider='SQLOLEDB', host=host, user=user, pwd=pwd, db=db)
+    try:
+        con = adodbapi.connect(DSN)
+    except Exception as e:
+        raise Exception("Unable to connect to MS SQL Server with "
+            f"database {db}; and supplied connection: "
+            f"host: {host}; user: {user}; pwd: {pwd}."
+            f"\nCaused by error: {b.ue(e)}")
+    cur = con.cursor()
+    cur.adoconn = con.adoConn  ## (need to access from just the cursor) 
+    return con, cur
+
+def get_dbs_list(con_dets, default_dbs):
+    con_resources = get_con_resources(con_dets, default_dbs)
+    con_resources[mg.DBE_CUR].close()
+    con_resources[mg.DBE_CON].close()
+    return con_resources[mg.DBE_DBS]
+
+def get_con_resources(con_dets, default_dbs, db=None):
+    """
+    When opening from scratch, e.g. clicking on Report Tables from Start,
+    no db, so must identify one, but when selecting dbe-db in dropdowns, there
+    will be a db.
+
+    If no db defined, use default if possible, or first with tables.
+
+    Returns dict with con, cur, dbs, db.
+    """
+    con_dets_mssql = con_dets.get(mg.DBE_MS_SQL)
+    if not con_dets_mssql:
+        raise my_exceptions.MissingConDets(mg.DBE_MS_SQL)
+    host = con_dets_mssql['host']  ## plain string keywords only
+    user = con_dets_mssql['user']
+    pwd = con_dets_mssql['passwd']
+    dbs, db = get_dbs(host, user, pwd, default_dbs, db)
+    set_db_in_con_dets(con_dets_mssql, db)
+    con, cur = get_con_cur_for_db(host, user, pwd, db)     
+    con_resources = {
+        mg.DBE_CON: con, mg.DBE_CUR: cur, mg.DBE_DBS: dbs, mg.DBE_DB: db}
+    return con_resources
+
+def get_tbls(cur, db):
+    """
+    Get table names given database and cursor. NB not system tables.
+    Cursor must be suitable for db.
+    """
+    cat = win32com.client.Dispatch(r'ADOX.Catalog')
+    cat.ActiveConnection = cur.adoconn
+    alltables = cat.Tables
+    tbls = []
+    for tab in alltables:
+        if tab.Type in ('TABLE', 'VIEW'):
+            tbls.append(tab.Name)
+    cat = None
+    return tbls
+
+def has_tbls(cur, db):
+    "Any non-system tables?"
+    cat = win32com.client.Dispatch(r'ADOX.Catalog')
+    cat.ActiveConnection = cur.adoconn
+    alltables = cat.Tables
+    for tab in alltables:
+        if tab.Type in ('TABLE', 'VIEW'):
+            return True
+    return False
+     
+def get_flds(cur, db, tbl):
+    """
+    Returns details for set of fields given database, table, and cursor.
+    NUMERIC_SCALE - number of significant digits to right of decimal point.
+    NUMERIC_SCALE should be Null if not numeric (but is in fact 255 so
+    I must set to None!).
+    """
+    debug = False
+    ## http://msdn.microsoft.com/en-us/library/aa155430(office.10).aspx
+    cat = win32com.client.Dispatch(r'ADOX.Catalog')  ## has everything I 
+        ## need but pos and charset
+    cat.ActiveConnection = cur.adoconn
+    ## Extra properties which can't be obtained from cat.Tables.Columns
+    ## viz ordinal position and charset
+    ## Do not add fourth constraint(None, None, "tbltest", None) will not work!
+    ## It should (see http://www.w3schools.com/ADO/met_conn_openschema.asp) but ...
+    extras = {}
+    rs = cur.adoconn.OpenSchema(AD_SCHEMA_COLUMNS, (None, None, tbl)) 
+    while not rs.EOF:
+        fldname = rs.Fields('COLUMN_NAME').Value
+        ord_pos = rs.Fields('ORDINAL_POSITION').Value
+        char_set = rs.Fields('CHARACTER_SET_NAME').Value
+        extras[fldname] = (ord_pos, char_set)
+        rs.MoveNext()
+    flds = {}
+    for col in cat.Tables(tbl).Columns:
+        ## Build dic of fields, each with dic of characteristics
+        fldname = col.Name
+        if debug: print(col.Type)
+        fldtype = dbe_globals.get_ado_dict().get(col.Type)
+        if not fldtype:
+            raise Exception("Not an MS SQL Server ADO field type %d" % col.Type)
+        bolnumeric = fldtype in dbe_globals.NUMERIC_TYPES
+        try:
+            bolautonum = col.Properties('AutoIncrement').Value
+        except Exception:
+            bolautonum = False
+        try:
+            bolnullable = col.Properties('Nullable').Value
+        except Exception:
+            bolnullable = False
+        try:
+            default = col.Properties('Default').Value
+        except Exception:
+            default = ''
+        boldata_entry_ok = not bolautonum
+        dec_pts = col.NumericScale if col.NumericScale < 18 else 0
+        boldatetime = fldtype in dbe_globals.DATETIME_TYPES
+        fld_txt = not bolnumeric and not boldatetime
+        num_prec = col.Precision
+        bolsigned = True if bolnumeric else None
+        min_val, max_val = dbe_globals.get_min_max(fldtype, num_prec, 
+            dec_pts)
+        dets_dic = {
+            mg.FLD_SEQ: extras[fldname][0],
+            mg.FLD_BOLNULLABLE: bolnullable,
+            mg.FLD_DATA_ENTRY_OK: boldata_entry_ok,
+            mg.FLD_COLUMN_DEFAULT: default,
+            mg.FLD_BOLTEXT: fld_txt,
+            mg.FLD_TEXT_LENGTH: col.DefinedSize,
+            mg.FLD_CHARSET: extras[fldname][1],
+            mg.FLD_BOLNUMERIC: bolnumeric,
+            mg.FLD_BOLAUTONUMBER: bolautonum,
+            mg.FLD_DECPTS: dec_pts,
+            mg.FLD_NUM_WIDTH: num_prec,
+            mg.FLD_BOL_NUM_SIGNED: bolsigned,
+            mg.FLD_NUM_MIN_VAL: min_val,
+            mg.FLD_NUM_MAX_VAL: max_val,
+            mg.FLD_BOLDATETIME: boldatetime, 
+        }
+        flds[fldname] = dets_dic
+    debug = False 
+    if debug:
+        pprint.pprint(flds)
+    cat = None
+    return flds
+
+def get_index_dets(cur, db, tbl):
+    """
+    db -- needed by some dbes sharing interface.
+    has_unique - boolean
+    idxs = [idx0, idx1, ...]
+    each idx is a dict name, is_unique, flds
+    """
+    cat = win32com.client.Dispatch(r'ADOX.Catalog')
+    cat.ActiveConnection = cur.adoconn
+    index_coll = cat.Tables(tbl).Indexes
+    ## initialise
+    has_unique = False
+    idxs = []
+    for index in index_coll:
+        if index.Unique:
+            has_unique = True
+        fldnames = [x.Name for x in index.Columns]
+        idx_dic = {mg.IDX_NAME: index.Name, mg.IDX_IS_UNIQUE: index.Unique,
+            mg.IDX_FLDS: fldnames}
+        idxs.append(idx_dic)
+    cat = None
+    debug = False
+    if debug:
+        pprint.pprint(idxs)
+        print(has_unique)
+    return idxs, has_unique
+
+def get_dbe_szr(dlg_proj, scroll, lblfont, *, read_only=False):
+    bx_mssql= wx.StaticBox(scroll, -1, 'Microsoft SQL Server')
+    ## default database
+    dlg_proj.lbl_mssql_default_db = wx.StaticText(
+        scroll, -1, _("Default Database:"))
+    dlg_proj.lbl_mssql_default_db.SetFont(lblfont)
+    mssql_default_db = (dlg_proj.mssql_default_db if dlg_proj.mssql_default_db
+        else '')
+    dlg_proj.txt_mssql_default_db = wx.TextCtrl(
+        scroll, -1, mssql_default_db, size=(250, -1))
+    dlg_proj.txt_mssql_default_db.Enable(not read_only)
+    dlg_proj.txt_mssql_default_db.SetToolTip(_("Default database (optional)"))
+    ## default table
+    dlg_proj.lbl_mssql_default_tbl = wx.StaticText(
+        scroll, -1, _("Default Table:"))
+    dlg_proj.lbl_mssql_default_tbl.SetFont(lblfont)
+    mssql_default_tbl = (
+        dlg_proj.mssql_default_tbl if dlg_proj.mssql_default_tbl
+        else '')
+    dlg_proj.txt_mssql_default_tbl = wx.TextCtrl(
+        scroll, -1, mssql_default_tbl, size=(250, -1))
+    dlg_proj.txt_mssql_default_tbl.Enable(not read_only)
+    dlg_proj.txt_mssql_default_tbl.SetToolTip(_("Default table (optional)"))
+    ## host
+    dlg_proj.lbl_mssql_host = wx.StaticText(
+        scroll, -1, _("Host - (local) if your machine:"))
+    dlg_proj.lbl_mssql_host.SetFont(lblfont)
+    mssql_host = dlg_proj.mssql_host
+    dlg_proj.txt_mssql_host = wx.TextCtrl(scroll, -1, mssql_host, size=(100, -1))
+    dlg_proj.txt_mssql_host.Enable(not read_only)
+    ## 1433 is the default port for MS SQL Server
+    dlg_proj.txt_mssql_host.SetToolTip(
+        _("Host e.g. (local), or 190.190.200.100,1433, or my-svr-01,1433"))
+    ## user
+    dlg_proj.lbl_mssql_user = wx.StaticText(scroll, -1, _("User - e.g. root:"))
+    dlg_proj.lbl_mssql_user.SetFont(lblfont)
+    mssql_user = dlg_proj.mssql_user if dlg_proj.mssql_user else ""
+    dlg_proj.txt_mssql_user = wx.TextCtrl(scroll, -1, mssql_user, size=(100, -1))
+    dlg_proj.txt_mssql_user.Enable(not read_only)
+    dlg_proj.txt_mssql_user.SetToolTip(_("User e.g. root"))
+    ## password
+    dlg_proj.lbl_mssql_pwd = wx.StaticText(
+        scroll, -1, _("Password - space if none:"))
+    dlg_proj.lbl_mssql_pwd.SetFont(lblfont)
+    mssql_pwd = dlg_proj.mssql_pwd if dlg_proj.mssql_pwd else ''
+    dlg_proj.txt_mssql_pwd = wx.TextCtrl(
+        scroll, -1, mssql_pwd, size=(100, -1), style=wx.TE_PASSWORD)
+    dlg_proj.txt_mssql_pwd.Enable(not read_only)
+    dlg_proj.txt_mssql_pwd.SetToolTip(_("Password"))
+    ## 2 MS SQL SERVER
+    szr_mssql = wx.StaticBoxSizer(bx_mssql, wx.VERTICAL)
+    ## 3 MSSQL INNER
+    ## 4 MSSQL INNER TOP
+    szr_mssql_inner_top = wx.BoxSizer(wx.HORIZONTAL)
+    ## default database
+    szr_mssql_inner_top.Add(
+        dlg_proj.lbl_mssql_default_db, 0, wx.LEFT|wx.RIGHT, 5)
+    szr_mssql_inner_top.Add(
+        dlg_proj.txt_mssql_default_db, 0, wx.GROW|wx.RIGHT, 10)
+    ## default table
+    szr_mssql_inner_top.Add(
+        dlg_proj.lbl_mssql_default_tbl, 0, wx.LEFT|wx.RIGHT, 5)
+    szr_mssql_inner_top.Add(
+        dlg_proj.txt_mssql_default_tbl, 0, wx.GROW|wx.RIGHT, 10)
+    ## 4 MSSQL INNER BOTTOM
+    szr_mssql_inner_btm = wx.BoxSizer(wx.HORIZONTAL)
+    ## host 
+    szr_mssql_inner_btm.Add(dlg_proj.lbl_mssql_host, 0, wx.LEFT|wx.RIGHT, 5)
+    szr_mssql_inner_btm.Add(dlg_proj.txt_mssql_host, 0, wx.RIGHT, 10)
+    ## user
+    szr_mssql_inner_btm.Add(dlg_proj.lbl_mssql_user, 0, wx.LEFT|wx.RIGHT, 5)
+    szr_mssql_inner_btm.Add(dlg_proj.txt_mssql_user, 0, wx.RIGHT, 10)
+    ## password
+    szr_mssql_inner_btm.Add(dlg_proj.lbl_mssql_pwd, 0, wx.LEFT|wx.RIGHT, 5)
+    szr_mssql_inner_btm.Add(dlg_proj.txt_mssql_pwd, 1, wx.GROW|wx.RIGHT, 10)
+    ## 2 combine
+    szr_mssql.Add(szr_mssql_inner_top, 0, wx.GROW|wx.ALL, 5)
+    szr_mssql.Add(szr_mssql_inner_btm, 0, wx.ALL, 5)
+    return szr_mssql
+
+def get_proj_settings(parent, proj_dic):
+    parent.mssql_default_db = proj_dic[mg.PROJ_DEFAULT_DBS].get(mg.DBE_MS_SQL)
+    parent.mssql_default_tbl = proj_dic[mg.PROJ_DEFAULT_TBLS].get(mg.DBE_MS_SQL)
+    ## optional (although if any mssql, for eg, must have all)
+    if proj_dic[mg.PROJ_CON_DETS].get(mg.DBE_MS_SQL):
+        parent.mssql_host = proj_dic[mg.PROJ_CON_DETS][mg.DBE_MS_SQL]['host']
+        parent.mssql_user = proj_dic[mg.PROJ_CON_DETS][mg.DBE_MS_SQL]['user']
+        parent.mssql_pwd = proj_dic[mg.PROJ_CON_DETS][mg.DBE_MS_SQL]['passwd']
+    else:
+        parent.mssql_host, parent.mssql_user, parent.mssql_pwd = '', '', ''
+
+def set_con_det_defaults(parent):
+    try:
+        parent.mssql_default_db
+    except AttributeError:
+        parent.mssql_default_db = ''
+    try:
+        parent.mssql_default_tbl
+    except AttributeError: 
+        parent.mssql_default_tbl = ''
+    try:
+        parent.mssql_host
+    except AttributeError: 
+        parent.mssql_host = ''
+    try:
+        parent.mssql_user
+    except AttributeError: 
+        parent.mssql_user = ''
+    try:            
+        parent.mssql_pwd
+    except AttributeError: 
+        parent.mssql_pwd = ''
+
+def gui_connection_info(dlg_proj, *, mandatory):
+    """
+    Copes with missing default database and table. Will get the first available.
+
+    :param wx.Dialog dlg_proj: dialog
+    :param bool mandatory: if true this is presumably the default DBE and empty
+     connection details is not an option
+    :return: default_db, default_tbl, dbe_con_dets (dict with key per db and val
+     of db path). Key has appended number if needed to ensure unique.
+    :rtype: tuple
+    """
+    mssql_default_db = dlg_proj.txt_mssql_default_db.GetValue()
+    mssql_default_tbl = dlg_proj.txt_mssql_default_tbl.GetValue()
+    mssql_host = dlg_proj.txt_mssql_host.GetValue()
+    mssql_user = dlg_proj.txt_mssql_user.GetValue()
+    mssql_pwd = dlg_proj.txt_mssql_pwd.GetValue()
+    has_mssql_con = mssql_host and mssql_user and mssql_pwd
+    dirty = (mssql_host or mssql_user or mssql_pwd or mssql_default_db 
+        or mssql_default_tbl)
+    incomplete_mssql = (dirty or mandatory) and not has_mssql_con
+    if incomplete_mssql:
+        msg = _("The SQL Server details are incomplete")
+        if mandatory:
+            msg += f' yet {mg.DBE_MS_SQL} is selected as the default database'
+        wx.MessageBox(msg)
+        dlg_proj.txt_mssql_default_db.SetFocus()
+        raise Exception(msg)
+    default_db = mssql_default_db if mssql_default_db else None
+    default_tbl = mssql_default_tbl if mssql_default_tbl else None
+    if has_mssql_con:
+        dbe_con_dets = {
+            'host': mssql_host, 'user': mssql_user, 'passwd': mssql_pwd}
+    else:
+        dbe_con_dets = {}
+    return default_db, default_tbl, dbe_con_dets

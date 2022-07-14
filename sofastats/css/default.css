@@ -1,0 +1,242 @@
+/*
+dojo_style_start
+chart_bg = "white"
+chart_font_colour = "#423126"
+plot_bg = "#f2f1f0"
+plot_font_colour = "#423126"
+plot_bg_filled = "#f2f1f0"
+plot_font_colour_filled = "#423126"
+axis_font_colour = "#423126"
+major_gridline_colour = "#b8a49e"
+gridline_width = 1
+stroke_width = 3
+tooltip_border_colour = "#736354"
+normal_curve_colour = "#423126"
+colour_mappings = [
+    ("#e95f29", "#ef7d44"),
+    ("#f4cb3a", "#f7d858"),
+    ("#4495c3", "#62add2"),
+    ("#44953a", "#62ad58"),
+    ("#f43a3a", "#f75858"),
+    ]
+connector_style = "defbrown"
+dojo_style_end
+*/
+    body{
+        font-size: 12px;
+        font-family: Ubuntu, Helvetica, Arial, sans-serif;
+    }
+    h1, h2{
+        font-family: Ubuntu, Helvetica, Arial, sans-serif;
+        font-weight: bold;
+    }
+    h1{
+        font-size: 18px;
+    }
+    h2{
+        font-size: 16px;
+    }
+    .gui-msg-medium, gui-msg-small{
+        color: #29221c;
+        font-family: Ubuntu, Helvetica, Arial, sans-serif;
+    }
+    .gui-msg-medium{
+        font-size: 16px;
+    }
+    *html .gui-msg-medium{
+        font-weight: bold;
+        font-size: 18px;
+    }
+    .gui-msg-small{
+        font-size: 13px;
+        line-height: 150%;
+    }
+    .gui-note{
+        background-color: #e95829;
+        color: white;
+        font-weight: bold;
+        padding: 2px;
+    }
+    tr, td, th{
+        margin: 0;
+    }
+
+    .tbltitle, .tblsubtitle{
+        margin: 0;
+        font-family: Ubuntu, Helvetica, Arial, sans-serif;
+        font-weight: bold;
+        font-size: 14px;
+    }
+    .tbltitle{ /*spans*/
+        padding: 0;
+        font-size: 18px;
+    }
+    .tblsubtitle{
+        padding: 12px 0px 0px 0px;
+        font-size: 14px;
+    }
+    .tblcelltitle{ /*th*/
+        text-align: left;
+        border: none;
+        padding: 0px 0px 12px 0px;
+        margin: 0;
+    }
+
+    th, .rowvar, .rowval, .datacell, .firstdatacell {
+        border: solid 1px #A1A1A1;
+    }
+    th{
+        margin: 0;
+        padding: 0px 6px;
+    }
+    td{
+        padding: 2px 6px;
+        border: solid 1px #c0c0c0;
+        font-size: 13px;
+    }
+    .subtable{
+        border-top: solid 3px #c0c0c0;
+    }
+    .rowval{
+        margin: 0;
+    }
+    .datacell, .firstdatacell{
+        text-align: right;
+        margin: 0;
+    }
+    .firstcolvar, .firstrowvar, .spaceholder {
+        font-family: Ubuntu, Helvetica, Arial, sans-serif;
+        font-weight: bold;
+        font-size: 14px;
+        color: white;
+    }
+    .firstcolvar, .firstrowvar{
+        background-color: #333435;
+    }
+    .firstrowvar{
+        border-left: solid 1px #333435;
+        border-bottom:  solid 1px #333435;
+    }
+    .topline{
+        border-top: 2px solid #c0c0c0;
+    }
+    .spaceholder {
+        background-color: #CCD9D7;
+    }
+    .firstcolvar{
+        padding: 9px 6px;
+        vertical-align: top;
+    }
+    .rowvar, .colvar{
+        font-family: Ubuntu, Helvetica, Arial, sans-serif;
+        font-weight: bold;
+        font-size: 14px;
+        color: #333435;
+        background-color: white;
+    }
+    .colvar{
+        padding: 6px 0px;            
+    } 
+    .colval, .measure{
+        font-size: 12px;
+        vertical-align: top;
+    }
+    table {
+        border-collapse: collapse;
+    }
+    tr.total-row td{
+        font-weight: bold;
+        border-top: solid 2px black;
+        border-bottom: double 3px black;
+    }
+    .page-break-before{
+        page-break-before: always;
+        border-bottom: none; /*3px dotted #AFAFAF;*/
+        width: auto;
+        height: 18px;
+    }
+    td.lbl{
+        text-align: left;
+        background-color: #F5F5F5;
+    }
+    td.right{
+        text-align: right;
+    }
+    .ftnote-line{
+        /* for hr http://www.w3schools.com/TAGS/att_hr_align.asp*/
+        width: 300px;
+        text-align: left; /* IE and Opera*/
+        margin-left: 0; /* Firefox, Chrome, Safari */
+    }
+    .tbl-header-ftnote{
+        color: white;
+    }
+    .ftnote{
+        color: black;
+    }
+    /* Tool tip connector arrows */
+    .dijitTooltipBelow-defbrown {
+	
+	    padding-top: 13px;
+    }
+    .dijitTooltipAbove-defbrown {
+	
+	    padding-bottom: 13px;
+    }
+    .tundra .dijitTooltipBelow-defbrown .dijitTooltipConnector {
+	
+	    top: 0px;
+	    left: 3px;
+	    background: url("sofastats_report_extras/tooltipConnectorUp-defbrown.png") no-repeat top left !important;
+	    width:16px;
+	    height:14px;
+    }
+    .dj_ie .tundra .dijitTooltipBelow-defbrown .dijitTooltipConnector {
+	
+	    background-image: url("sofastats_report_extras/tooltipConnectorUp-defbrown.gif") !important;
+    }
+    .tundra .dijitTooltipAbove-defbrown .dijitTooltipConnector {
+	
+	    bottom: 0px;
+	    left: 3px;
+	    background:url("sofastats_report_extras/tooltipConnectorDown-defbrown.png") no-repeat top left !important;
+	    width:16px;
+	    height:14px;
+    }
+    .dj_ie .tundra .dijitTooltipAbove-defbrown .dijitTooltipConnector {
+	    background-image: url("sofastats_report_extras/tooltipConnectorDown-defbrown.gif") !important;
+    }
+    .dj_ie6 .tundra .dijitTooltipAbove-defbrown .dijitTooltipConnector {
+	    bottom: -3px;
+    }
+    .tundra .dijitTooltipLeft-defbrown {
+	    padding-right: 14px;
+    }
+    .dj_ie6 .tundra .dijitTooltipLeft-defbrown {
+	    padding-left: 15px;
+    }
+    .tundra .dijitTooltipLeft-defbrown .dijitTooltipConnector {
+	
+	    right: 0px;
+	    bottom: 3px;
+	    background:url("sofastats_report_extras/tooltipConnectorRight-defbrown.png") no-repeat top left !important;
+	    width:16px;
+	    height:14px;
+    }
+    .dj_ie .tundra .dijitTooltipLeft-defbrown .dijitTooltipConnector {
+	    background-image: url("sofastats_report_extras/tooltipConnectorRight-defbrown.gif") !important;
+    }
+    .tundra .dijitTooltipRight-defbrown {
+	    padding-left: 14px;
+    }
+    .tundra .dijitTooltipRight-defbrown .dijitTooltipConnector {
+	
+	    left: 0px;
+	    bottom: 3px;
+	    background:url("sofastats_report_extras/tooltipConnectorLeft-defbrown.png") no-repeat top left !important;
+	    width:16px;
+	    height:14px;
+    }
+    .dj_ie .tundra .dijitTooltipRight-defbrown .dijitTooltipConnector {
+	    background-image: url("sofastats_report_extras/tooltipConnectorLeft-defbrown.gif") !important;
+    }

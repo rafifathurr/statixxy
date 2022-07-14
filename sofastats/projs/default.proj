@@ -1,0 +1,19 @@
+# Windows file paths _must_ have double not single backslashes
+# "C:\\Users\\demo.txt" is GOOD
+# "C:\Users\demo.txt" is BAD
+
+proj_notes = "Default project so users can get started without having to understand projects. Read only."
+
+fil_var_dets = "/home/g/Documents/sofastats/vdts/general_var_dets.vdts"
+fil_css = "/home/g/Documents/sofastats/css/default.css"
+fil_report = "/home/g/Documents/sofastats/reports/default_report.htm"
+fil_script = "/home/g/Documents/sofastats/scripts/general_scripts.py"
+default_dbe = "SQLite"
+
+default_dbs = {'MySQL': None, 'SQLite': 'sofa_db'}
+
+default_tbls = {'MySQL': None, 'SQLite': 'demo_tbl'}
+
+con_dets = {'SQLite': {'sofa_db': {'database': "/home/g/Documents/sofastats/_internal/sofa_db"}}}
+
+open_on_start = False
